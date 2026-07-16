@@ -59,6 +59,18 @@ type ConfigEntry struct {
 	ExcludeUserRepos       bool
 	Forks                  bool
 	Visibility             []string
+	AzureDevOpsURL         string
+	AzureDevOpsOrg         string
+	AzureDevOpsOrgs        []string
+	AzureDevOpsProjects    []string
+	AzureDevOpsRepos       []string
+	AzureDevOpsUseTfsPath  bool
+	BitBucketCloud         bool
+	BitBucketCloudWorkspace string
+	BitBucketCloudWorkspaces []string
+	BitBucketCloudProjects []string
+	BitBucketCloudRepos    []string
+	BitBucketCloudNoForks  bool
 }
 
 func randomize(entries []ConfigEntry) []ConfigEntry {
@@ -246,6 +258,69 @@ func executeMirror(cfg []ConfigEntry, repoDir string, pendingRepos chan<- string
 			}
 			if c.CredentialPath != "" {
 				cmd.Args = append(cmd.Args, "-credentials", c.CredentialPath)
+			}
+			if !c.KeepDeleted {
+				cmd.Args = append(cmd.Args, "-delete")
+			}
+		} else if c.AzureDevOpsURL != "" || c.AzureDevOpsOrg != "" || len(c.AzureDevOpsOrgs) > 0 || len(c.AzureDevOpsProjects) > 0 || len(c.AzureDevOpsRepos) > 0 {
+			cmd = exec.Command("zoekt-mirror-ado",
+				"-dest", repoDir)
+			if c.AzureDevOpsURL != "" {
+				cmd.Args = append(cmd.Args, "-url", c.AzureDevOpsURL)
+			}
+			if c.AzureDevOpsOrg != "" {
+				cmd.Args = append(cmd.Args, "-org", c.AzureDevOpsOrg)
+			}
+			for _, org := range c.AzureDevOpsOrgs {
+				cmd.Args = append(cmd.Args, "-orgs", org)
+			}
+			for _, project := range c.AzureDevOpsProjects {
+				cmd.Args = append(cmd.Args, "-projects", project)
+			}
+			for _, repo := range c.AzureDevOpsRepos {
+				cmd.Args = append(cmd.Args, "-repos", repo)
+			}
+			if c.AzureDevOpsUseTfsPath {
+				cmd.Args = append(cmd.Args, "-use-tfs-path")
+			}
+			if c.Name != "" {
+				cmd.Args = append(cmd.Args, "-name", c.Name)
+			}
+			if c.Exclude != "" {
+				cmd.Args = append(cmd.Args, "-exclude", c.Exclude)
+			}
+			if c.CredentialPath != "" {
+				cmd.Args = append(cmd.Args, "-token", c.CredentialPath)
+			}
+			if !c.KeepDeleted {
+				cmd.Args = append(cmd.Args, "-delete")
+			}
+		} else if c.BitBucketCloud {
+			cmd = exec.Command("zoekt-mirror-bitbucket-cloud",
+				"-dest", repoDir)
+			if c.BitBucketCloudWorkspace != "" {
+				cmd.Args = append(cmd.Args, "-workspace", c.BitBucketCloudWorkspace)
+			}
+			for _, workspace := range c.BitBucketCloudWorkspaces {
+				cmd.Args = append(cmd.Args, "-workspaces", workspace)
+			}
+			for _, project := range c.BitBucketCloudProjects {
+				cmd.Args = append(cmd.Args, "-projects", project)
+			}
+			for _, repo := range c.BitBucketCloudRepos {
+				cmd.Args = append(cmd.Args, "-repos", repo)
+			}
+			if c.Name != "" {
+				cmd.Args = append(cmd.Args, "-name", c.Name)
+			}
+			if c.Exclude != "" {
+				cmd.Args = append(cmd.Args, "-exclude", c.Exclude)
+			}
+			if c.CredentialPath != "" {
+				cmd.Args = append(cmd.Args, "-token", c.CredentialPath)
+			}
+			if c.BitBucketCloudNoForks {
+				cmd.Args = append(cmd.Args, "-no-forks")
 			}
 			if !c.KeepDeleted {
 				cmd.Args = append(cmd.Args, "-delete")

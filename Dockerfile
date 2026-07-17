@@ -22,9 +22,16 @@ RUN --mount=type=cache,target=/go/pkg/mod \
       -o /out/ \
       ./cmd/...
 
-FROM alpine:3
+FROM alpine:3.24
 
-RUN apk add --no-cache git ca-certificates bind-tools tini jansson wget
+RUN apk add --no-cache git ca-certificates bind-tools tini jansson wget && \
+    version=$(git --version | awk '{print $3}' | cut -d- -f1) && \
+    major=$(echo "$version" | cut -d. -f1) && \
+    minor=$(echo "$version" | cut -d. -f2) && \
+    if [ "$major" -lt 2 ] || { [ "$major" -eq 2 ] && [ "$minor" -lt 52 ]; }; then \
+      echo "git $version is below minimum 2.52.0" >&2; exit 1; \
+    fi && \
+    echo "git $version (>= 2.52.0)"
 
 COPY --chmod=755 install-ctags-alpine.sh /usr/local/bin/install-ctags-alpine.sh
 RUN /usr/local/bin/install-ctags-alpine.sh && \

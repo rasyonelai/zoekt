@@ -26,13 +26,16 @@ docker pull ghcr.io/rasyonelai/zoekt:v2025.07
 
 ### Release workflow (upstream sync)
 
+Local clones often have `origin` → `sourcegraph/zoekt` (upstream) and **`rasyonelai`** → `rasyonelai/zoekt` (fork). Push fork changes to **`rasyonelai`**, not `origin`.
+
 1. Rebase onto `sourcegraph/zoekt` main and fix conflicts in mirror tools if needed.
-2. Run local smoke (index + search) or rely on existing Atlas `pnpm docker:code-smoke`.
-3. Publish image — either:
-   - **Tag release:** `git tag v2025.07 && git push origin v2025.07` (CI builds and pushes to GHCR), or
+2. `git push rasyonelai main`
+3. Run local smoke (index + search) or rely on Atlas `pnpm docker:code-smoke`.
+4. Publish image — either:
+   - **Tag release:** `git tag v2025.07.21 && git push rasyonelai v2025.07.21` (CI builds and pushes to GHCR), or
    - **Manual:** Actions → Docker → Run workflow on the target commit.
-4. In Atlas: set `ZOEKT_IMAGE_TAG` to the new SHA or semver tag in `.env` / `.env.example` and `docker-compose.yml` defaults.
-5. Redeploy: `docker compose pull zoekt-webserver && docker compose build zoekt-indexserver code-mirror && docker compose up -d zoekt-webserver zoekt-indexserver code-mirror`
+5. In Atlas: set `ZOEKT_IMAGE_TAG` to the new tag or short SHA in `.env` / `.env.example` and `docker-compose.yml` defaults.
+6. Redeploy: `docker compose pull zoekt-webserver && docker compose build zoekt-indexserver code-mirror && docker compose up -d zoekt-webserver zoekt-indexserver code-mirror`
 
 CI triggers: `workflow_dispatch` and `v*` tags only — ordinary merges to `main` do not rebuild the image.
 

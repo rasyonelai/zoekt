@@ -14,13 +14,27 @@ Bitbucket Cloud discovery follows [Sourcebot bitbucket.ts](https://github.com/so
 
 ## Container image
 
-Published to **`ghcr.io/rasyonelai/zoekt`** (not project-specific names).
+Published to **`ghcr.io/rasyonelai/zoekt`** on release only (not on every `main` push).
 
 ```bash
-docker pull ghcr.io/rasyonelai/zoekt:main
+docker pull ghcr.io/rasyonelai/zoekt:e9e828dd
+# or after a semver release:
+docker pull ghcr.io/rasyonelai/zoekt:v2025.07
 ```
 
-Pin by digest or semver tag in production — avoid floating `main` in customer deployments.
+**Always pin by commit SHA or semver tag** in Atlas (`ZOEKT_IMAGE_TAG` in `.env`). Do not use floating tags in production.
+
+### Release workflow (upstream sync)
+
+1. Rebase onto `sourcegraph/zoekt` main and fix conflicts in mirror tools if needed.
+2. Run local smoke (index + search) or rely on existing Atlas `pnpm docker:code-smoke`.
+3. Publish image — either:
+   - **Tag release:** `git tag v2025.07 && git push origin v2025.07` (CI builds and pushes to GHCR), or
+   - **Manual:** Actions → Docker → Run workflow on the target commit.
+4. In Atlas: set `ZOEKT_IMAGE_TAG` to the new SHA or semver tag in `.env` / `.env.example` and `docker-compose.yml` defaults.
+5. Redeploy: `docker compose pull zoekt-webserver && docker compose build zoekt-indexserver code-mirror && docker compose up -d zoekt-webserver zoekt-indexserver code-mirror`
+
+CI triggers: `workflow_dispatch` and `v*` tags only — ordinary merges to `main` do not rebuild the image.
 
 ## mirror.json examples
 
@@ -60,3 +74,5 @@ Pin by digest or semver tag in production — avoid floating `main` in customer 
 ## Upstream sync
 
 Rebase periodically onto `sourcegraph/zoekt` main. Mirror tool additions live under `cmd/zoekt-mirror-ado` and `cmd/zoekt-mirror-bitbucket-cloud`; indexserver wiring is in `cmd/zoekt-indexserver/config.go`.
+
+See **Release workflow** under Container image above when publishing a new GHCR image and bumping Atlas.

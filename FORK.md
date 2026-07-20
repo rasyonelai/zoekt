@@ -17,7 +17,7 @@ Bitbucket Cloud discovery follows [Sourcebot bitbucket.ts](https://github.com/so
 Published to **`ghcr.io/rasyonelai/zoekt`** on release only (not on every `main` push).
 
 ```bash
-docker pull ghcr.io/rasyonelai/zoekt:e9e828dd
+docker pull ghcr.io/rasyonelai/zoekt:v2025.07.20
 # or after a semver release:
 docker pull ghcr.io/rasyonelai/zoekt:v2025.07
 ```

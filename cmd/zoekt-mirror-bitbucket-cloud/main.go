@@ -32,10 +32,9 @@ import (
 	"github.com/sourcegraph/zoekt/gitindex"
 )
 
-const (
-	bbCloudAPI  = "https://api.bitbucket.org/2.0"
-	bbCloudHost = "bitbucket.org"
-)
+var bbCloudAPI = "https://api.bitbucket.org/2.0"
+
+const bbCloudHost = "bitbucket.org"
 
 type bbCloudRepo struct {
 	FullName string `json:"full_name"`

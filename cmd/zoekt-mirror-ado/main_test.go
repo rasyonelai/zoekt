@@ -4,6 +4,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -179,11 +181,16 @@ func TestDeleteStaleReposUsesScopedZoektName(t *testing.T) {
 		t.Fatalf("NewFilter: %v", err)
 	}
 
+	destDir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(destDir, "dev.azure.com"), 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+
 	repo := adoRepo{Name: "api"}
 	repo.Project.Name = "Platform"
 	repos := []adoScopedRepo{{scope: "acme", repo: repo}}
 
-	if err := deleteStaleRepos(t.TempDir(), filter, repos, "dev.azure.com"); err != nil {
+	if err := deleteStaleRepos(destDir, filter, repos, "dev.azure.com"); err != nil {
 		t.Fatalf("deleteStaleRepos: %v", err)
 	}
 }

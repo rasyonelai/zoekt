@@ -14,6 +14,9 @@
 
 // Command zoekt-mirror-ado discovers and clones Azure DevOps repositories.
 // Supports Azure DevOps Cloud and Server (with optional /tfs path).
+//
+// zoekt.name format: {hostname}/{scope}/{project}/{repo}
+// where scope is the cloud organization or server collection name.
 package main
 
 import (
@@ -52,7 +55,14 @@ type adoRepo struct {
 }
 
 type adoListResponse[T any] struct {
-	Value []T `json:"value"`
+	Count             int    `json:"count"`
+	Value             []T    `json:"value"`
+	ContinuationToken string `json:"continuationToken"`
+}
+
+type adoScopedRepo struct {
+	scope string
+	repo  adoRepo
 }
 
 type stringList []string
@@ -100,13 +110,17 @@ func main() {
 		log.Fatal(err)
 	}
 
+	if err := validateUseTfsPath(rootURL, *useTfsPath); err != nil {
+		log.Fatal(err)
+	}
+
 	client := &http.Client{Timeout: 120 * time.Second}
 	destDir := filepath.Join(*dest, rootURL.Host)
 	if err := os.MkdirAll(destDir, 0o755); err != nil {
 		log.Fatal(err)
 	}
 
-	var allRepos []adoRepo
+	var allRepos []adoScopedRepo
 	if *org != "" {
 		found, err := listOrgRepos(client, rootURL, *org, pat, *useTfsPath)
 		if err != nil {
@@ -129,7 +143,7 @@ func main() {
 		allRepos = append(allRepos, found...)
 	}
 	for _, r := range repos {
-		found, err := getRepo(client, rootURL, r, pat, *useTfsPath)
+		found, err := getScopedRepo(client, rootURL, r, pat, *useTfsPath)
 		if err != nil {
 			log.Printf("getRepo(%q): %v", r, err)
 			continue
@@ -143,12 +157,12 @@ func main() {
 	}
 
 	trimmed := allRepos[:0]
-	for _, r := range allRepos {
-		if r.IsDisabled || r.RemoteURL == "" {
+	for _, entry := range allRepos {
+		if entry.repo.IsDisabled || entry.repo.RemoteURL == "" {
 			continue
 		}
-		if filter.Include(r.Name) {
-			trimmed = append(trimmed, r)
+		if filter.Include(entry.repo.Name) {
+			trimmed = append(trimmed, entry)
 		}
 	}
 	allRepos = trimmed
@@ -173,6 +187,20 @@ func readToken(path string) (string, error) {
 		return "", err
 	}
 	return strings.TrimSpace(string(content)), nil
+}
+
+func validateUseTfsPath(base *url.URL, useTfsPath bool) error {
+	if !useTfsPath {
+		return nil
+	}
+	path := strings.TrimRight(base.Path, "/")
+	if strings.HasSuffix(path, "/tfs") {
+		return fmt.Errorf(
+			"AzureDevOpsURL already contains /tfs (%q); set use-tfs-path=false or use the server root URL without /tfs",
+			base.String(),
+		)
+	}
+	return nil
 }
 
 func buildOrgURL(base *url.URL, org string, useTfsPath bool) string {
@@ -213,68 +241,129 @@ func adoRequest[T any](client *http.Client, requestURL, pat string) (T, error) {
 	return result, nil
 }
 
-func listOrgRepos(client *http.Client, base *url.URL, org, pat string, useTfsPath bool) ([]adoRepo, error) {
+func adoListAll[T any](client *http.Client, initialURL, pat string) ([]T, error) {
+	nextURL := initialURL
+	var all []T
+
+	for nextURL != "" {
+		page, err := adoRequest[adoListResponse[T]](client, nextURL, pat)
+		if err != nil {
+			return nil, err
+		}
+		all = append(all, page.Value...)
+		if page.ContinuationToken == "" {
+			break
+		}
+		parsed, err := url.Parse(nextURL)
+		if err != nil {
+			return nil, err
+		}
+		query := parsed.Query()
+		query.Set("continuationToken", page.ContinuationToken)
+		parsed.RawQuery = query.Encode()
+		nextURL = parsed.String()
+	}
+
+	return all, nil
+}
+
+func listOrgRepos(client *http.Client, base *url.URL, org, pat string, useTfsPath bool) ([]adoScopedRepo, error) {
 	orgURL := buildOrgURL(base, org, useTfsPath)
-	projectsURL := fmt.Sprintf("%s/_apis/projects?api-version=%s&$top=1000", orgURL, adoAPIVersion)
-	projectsResp, err := adoRequest[adoListResponse[adoProject]](client, projectsURL, pat)
+	projectsURL := fmt.Sprintf("%s/_apis/projects?api-version=%s&$top=100", orgURL, adoAPIVersion)
+	projects, err := adoListAll[adoProject](client, projectsURL, pat)
 	if err != nil {
 		return nil, err
 	}
 
-	var allRepos []adoRepo
-	for _, project := range projectsResp.Value {
-		reposURL := fmt.Sprintf("%s/%s/_apis/git/repositories?api-version=%s", orgURL, url.PathEscape(project.Name), adoAPIVersion)
-		reposResp, err := adoRequest[adoListResponse[adoRepo]](client, reposURL, pat)
+	var allRepos []adoScopedRepo
+	for _, project := range projects {
+		reposURL := fmt.Sprintf(
+			"%s/%s/_apis/git/repositories?api-version=%s&$top=100",
+			orgURL,
+			url.PathEscape(project.Name),
+			adoAPIVersion,
+		)
+		repos, err := adoListAll[adoRepo](client, reposURL, pat)
 		if err != nil {
 			log.Printf("list repos for project %s: %v", project.Name, err)
 			continue
 		}
-		allRepos = append(allRepos, reposResp.Value...)
+		for _, repo := range repos {
+			allRepos = append(allRepos, adoScopedRepo{scope: org, repo: repo})
+		}
 	}
 	return allRepos, nil
 }
 
-func listProjectRepos(client *http.Client, base *url.URL, projectPath, pat string, useTfsPath bool) ([]adoRepo, error) {
+func listProjectRepos(client *http.Client, base *url.URL, projectPath, pat string, useTfsPath bool) ([]adoScopedRepo, error) {
 	parts := strings.Split(projectPath, "/")
 	if len(parts) != 2 {
 		return nil, fmt.Errorf("project must be org/project, got %q", projectPath)
 	}
 	orgURL := buildOrgURL(base, parts[0], useTfsPath)
-	reposURL := fmt.Sprintf("%s/%s/_apis/git/repositories?api-version=%s", orgURL, url.PathEscape(parts[1]), adoAPIVersion)
-	reposResp, err := adoRequest[adoListResponse[adoRepo]](client, reposURL, pat)
+	reposURL := fmt.Sprintf(
+		"%s/%s/_apis/git/repositories?api-version=%s&$top=100",
+		orgURL,
+		url.PathEscape(parts[1]),
+		adoAPIVersion,
+	)
+	repos, err := adoListAll[adoRepo](client, reposURL, pat)
 	if err != nil {
 		return nil, err
 	}
-	return reposResp.Value, nil
+
+	scoped := make([]adoScopedRepo, 0, len(repos))
+	for _, repo := range repos {
+		scoped = append(scoped, adoScopedRepo{scope: parts[0], repo: repo})
+	}
+	return scoped, nil
 }
 
-func getRepo(client *http.Client, base *url.URL, repoPath, pat string, useTfsPath bool) (adoRepo, error) {
+func getScopedRepo(client *http.Client, base *url.URL, repoPath, pat string, useTfsPath bool) (adoScopedRepo, error) {
 	parts := strings.Split(repoPath, "/")
 	if len(parts) != 3 {
-		return adoRepo{}, fmt.Errorf("repo must be org/project/repo, got %q", repoPath)
+		return adoScopedRepo{}, fmt.Errorf("repo must be org/project/repo, got %q", repoPath)
 	}
 	orgURL := buildOrgURL(base, parts[0], useTfsPath)
-	repoURL := fmt.Sprintf("%s/%s/_apis/git/repositories/%s?api-version=%s", orgURL, url.PathEscape(parts[1]), url.PathEscape(parts[2]), adoAPIVersion)
-	return adoRequest[adoRepo](client, repoURL, pat)
+	repoURL := fmt.Sprintf(
+		"%s/%s/_apis/git/repositories/%s?api-version=%s",
+		orgURL,
+		url.PathEscape(parts[1]),
+		url.PathEscape(parts[2]),
+		adoAPIVersion,
+	)
+	repo, err := adoRequest[adoRepo](client, repoURL, pat)
+	if err != nil {
+		return adoScopedRepo{}, err
+	}
+	return adoScopedRepo{scope: parts[0], repo: repo}, nil
 }
 
-func repoZoektName(host string, repo adoRepo) string {
+func repoZoektName(host, scope string, repo adoRepo) string {
 	project := repo.Project.Name
 	if project == "" {
 		project = "unknown"
 	}
-	return filepath.Join(host, project, repo.Name)
+	return filepath.Join(host, scope, project, repo.Name)
 }
 
-func cloneRepos(destDir, host string, repos []adoRepo) error {
-	for _, r := range repos {
+func repoClonePath(scope string, repo adoRepo) string {
+	project := repo.Project.Name
+	if project == "" {
+		project = "unknown"
+	}
+	return filepath.Join(scope, project, repo.Name)
+}
+
+func cloneRepos(destDir, host string, repos []adoScopedRepo) error {
+	for _, entry := range repos {
 		config := map[string]string{
 			"zoekt.web-url-type": "azuredevops",
-			"zoekt.web-url":      strings.TrimSuffix(r.RemoteURL, ".git"),
-			"zoekt.name":         repoZoektName(host, r),
+			"zoekt.web-url":      strings.TrimSuffix(entry.repo.RemoteURL, ".git"),
+			"zoekt.name":         repoZoektName(host, entry.scope, entry.repo),
 		}
 
-		dest, err := gitindex.CloneRepo(destDir, filepath.Join(r.Project.Name, r.Name), r.RemoteURL, config)
+		dest, err := gitindex.CloneRepo(destDir, repoClonePath(entry.scope, entry.repo), entry.repo.RemoteURL, config)
 		if err != nil {
 			return err
 		}
@@ -285,7 +374,7 @@ func cloneRepos(destDir, host string, repos []adoRepo) error {
 	return nil
 }
 
-func deleteStaleRepos(destDir string, filter *gitindex.Filter, repos []adoRepo, host string) error {
+func deleteStaleRepos(destDir string, filter *gitindex.Filter, repos []adoScopedRepo, host string) error {
 	if len(repos) == 0 {
 		return nil
 	}
@@ -295,8 +384,8 @@ func deleteStaleRepos(destDir string, filter *gitindex.Filter, repos []adoRepo, 
 	}
 
 	names := map[string]struct{}{}
-	for _, r := range repos {
-		names[repoZoektName(host, r)+".git"] = struct{}{}
+	for _, entry := range repos {
+		names[repoZoektName(host, entry.scope, entry.repo)+".git"] = struct{}{}
 	}
 
 	return gitindex.DeleteRepos(destDir, u, names, filter)

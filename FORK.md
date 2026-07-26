@@ -9,6 +9,32 @@ Fork of [sourcegraph/zoekt](https://github.com/sourcegraph/zoekt) with additiona
 | `zoekt-mirror-ado` | `AzureDevOpsURL`, `AzureDevOpsOrg`, `AzureDevOpsOrgs`, `AzureDevOpsProjects`, `AzureDevOpsRepos`, `AzureDevOpsUseTfsPath` | Azure DevOps Cloud + Server |
 | `zoekt-mirror-bitbucket-cloud` | `BitBucketCloud`, `BitBucketCloudWorkspace`, `BitBucketCloudWorkspaces`, `BitBucketCloudProjects`, `BitBucketCloudRepos` | Bitbucket Cloud API v2 |
 
+### ADO `zoekt.name` format
+
+Repositories are named `{hostname}/{scope}/{project}/{repo}` where:
+
+- `hostname` — API host (e.g. `dev.azure.com`, `ado.example.com`)
+- `scope` — cloud **organization** or server **collection** (`AzureDevOpsOrg`)
+- `project` — team project name
+- `repo` — git repository name
+
+Examples:
+
+- Cloud: `dev.azure.com/acme/Platform/api`
+- Server: `ado.example.com/DefaultCollection/Platform/api`
+
+### ADO Server URL / `AzureDevOpsUseTfsPath`
+
+| Layout | `AzureDevOpsURL` | `AzureDevOpsUseTfsPath` |
+|--------|------------------|-------------------------|
+| Cloud | `https://dev.azure.com` | `false` |
+| Server classic `/tfs/{collection}` | `https://ado.example.com` | `true` |
+| Server URL already includes `/tfs` | `https://ado.example.com/tfs` | `false` |
+| Server collection at root | `https://ado.example.com` | `false` |
+| Virtual dir (e.g. `/collection`) | `https://host/collection` | `false` |
+
+Do **not** set `AzureDevOpsUseTfsPath: true` when the base URL already ends with `/tfs` — the mirror tool rejects that combination.
+
 ADO discovery follows [Sourcebot azuredevops.ts](https://github.com/sourcebot-dev/sourcebot/blob/main/packages/backend/src/azuredevops.ts).  
 Bitbucket Cloud discovery follows [Sourcebot bitbucket.ts](https://github.com/sourcebot-dev/sourcebot/blob/main/packages/backend/src/bitbucket.ts).
 
@@ -17,7 +43,7 @@ Bitbucket Cloud discovery follows [Sourcebot bitbucket.ts](https://github.com/so
 Published to **`ghcr.io/rasyonelai/zoekt`** on release only (not on every `main` push).
 
 ```bash
-docker pull ghcr.io/rasyonelai/zoekt:v2025.07.20
+docker pull ghcr.io/rasyonelai/zoekt:v2025.07.21
 # or after a semver release:
 docker pull ghcr.io/rasyonelai/zoekt:v2025.07
 ```
